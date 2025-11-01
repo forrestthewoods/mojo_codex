@@ -6,7 +6,7 @@
   <visual>
     <headlight diffuse="0.7 0.7 0.7" ambient="0.25 0.25 0.25" specular="0.1 0.1 0.1"/>
     <rgba haze="0.25 0.30 0.35 1"/>
-    <global azimuth="135" elevation="-15"/>
+    <global azimuth="135" elevation="-15" offwidth="2048" offheight="1536"/>
   </visual>
 
   <asset>

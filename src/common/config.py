@@ -9,6 +9,7 @@ from enum import Enum
 import pathlib
 from typing import Optional
 
+from . import scenes
 
 class RenderBackend(str, Enum):
     """Supported MuJoCo rendering backends."""
@@ -22,6 +23,7 @@ class RenderBackend(str, Enum):
 class RenderConfig:
     """Top-level configuration for a benchmark session."""
 
+    scene: str = scenes.DEFAULT_SCENE_NAME
     backend: RenderBackend = RenderBackend.OPENGL
     width: int = 1280
     height: int = 720
@@ -32,7 +34,7 @@ class RenderConfig:
     seed: int = 1234
     warmup_frames: int = 30
     target_fps: int = 60
-    model_path: pathlib.Path = pathlib.Path("assets") / "robots" / "panda_shadow" / "mjcf" / "scene.xml"
+    model_path: pathlib.Path = scenes.get_scene_info(scenes.DEFAULT_SCENE_NAME).path
     frames_subdir: str = "frames"
 
     def as_dict(self) -> dict:
@@ -58,6 +60,7 @@ class RenderConfig:
             f"  save_frames  : {self.save_frames}",
             f"  output_dir   : {self.output_dir}",
             f"  log_file     : {self.log_file or '<stdout only>'}",
+            f"  scene        : {self.scene}",
             f"  model_path   : {self.model_path}",
             f"  seed         : {self.seed}",
         ]
@@ -67,3 +70,8 @@ class RenderConfig:
         """Return a copy with an updated output directory."""
 
         return replace(self, output_dir=new_output)
+
+    def with_scene(self, scene_name: str, model_path: pathlib.Path) -> "RenderConfig":
+        """Return a copy with an updated scene selection."""
+
+        return replace(self, scene=scene_name, model_path=model_path)

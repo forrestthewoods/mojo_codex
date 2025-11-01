@@ -9,6 +9,7 @@ This file tracks the project status so progress can resume after environment res
 - Project skeleton scaffolded with implemented CLI, configuration, rendering helpers, logging, and asset tooling modules.
 - Asset helper implemented: `httpx` added to dependencies, CLI downloads Panda scene XML plus full asset directory to `assets/robots/panda_shadow/mjcf/`.
 - Rendering benchmark CLI operational for the OpenGL backend; sample run produces timing metrics and JSON output under `outputs/<timestamp>/`.
+- Scene registry added with default `workbench` (menagerie) scene and new `apartment` interior MJCF; CLI exposes `--scene` flag and `scenes`/`compare` commands for discovery and benchmarking.
 
 ## Immediate Next Actions
 1. **Create documentation**

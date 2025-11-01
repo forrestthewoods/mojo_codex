@@ -20,7 +20,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from src.common import config, logging_utils, rendering
+from src.common import config, logging_utils, rendering, scenes as scene_registry
 
 if TYPE_CHECKING:
     import mujoco  # pragma: no cover
@@ -286,6 +286,12 @@ def run_benchmark(
     width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
     height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
     duration: float = typer.Option(3.0, "--duration", "-d", min=0.5, help="Duration of the timed benchmark (seconds)."),
+    scene: str = typer.Option(
+        scene_registry.DEFAULT_SCENE_NAME,
+        "--scene",
+        "-s",
+        help="Named scene to load (see the 'scenes' command).",
+    ),
     output: pathlib.Path = typer.Option(
         pathlib.Path("outputs"),
         "--output",
@@ -310,13 +316,25 @@ def run_benchmark(
     """
 
     default_cfg = config.RenderConfig()
-    model_to_use = model_path or default_cfg.model_path
+    selected_scene = scene
+
+    if model_path is not None:
+        model_to_use = model_path
+        selected_scene = "custom"
+    else:
+        try:
+            scene_info = scene_registry.get_scene_info(scene)
+        except KeyError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        model_to_use = scene_info.path
 
     if not model_to_use.exists():
         console.print(
-            f"[red]Model not found at {model_to_use}. Run 'pixi run python -m src.tools.fetch_assets download' first.[/red]"
+            f"[red]Model not found at {model_to_use}. "
+            "Run 'pixi run python -m src.tools.fetch_assets download' or provide a valid --model-path.[/red]"
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=3)
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = _prepare_output(output, timestamp)
@@ -333,6 +351,7 @@ def run_benchmark(
         seed=seed,
         warmup_frames=warmup_frames,
         target_fps=target_fps,
+        scene=selected_scene,
         model_path=model_to_use,
         frames_subdir=default_cfg.frames_subdir,
     )
@@ -341,15 +360,30 @@ def run_benchmark(
         metrics, frame_dir = _execute_benchmark(cfg, emit_summary=True)
     except rendering.BackendUnavailableError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=4) from exc
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=4) from exc
+        raise typer.Exit(code=5) from exc
 
     console.print(f"[green]Benchmark artifacts stored in {run_dir}[/green]")
     if cfg.save_frames and frame_dir is not None:
         console.print(f"Frames written to {frame_dir}")
     console.print(f"Metrics JSON saved to {cfg.log_file}")
+
+
+@app.command("scenes")
+def list_scenes() -> None:
+    """List available benchmark scenes."""
+
+    table = Table(title="Available Scenes", show_header=True, header_style="bold")
+    table.add_column("Scene", justify="left")
+    table.add_column("MJCF Path", justify="left")
+    table.add_column("Description", justify="left")
+
+    for info in scene_registry.list_scene_infos():
+        table.add_row(info.name, str(info.path), info.description)
+
+    console.print(table)
 
 
 @app.command("compare")
@@ -363,6 +397,12 @@ def compare_backends(
     width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
     height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
     duration: float = typer.Option(3.0, "--duration", "-d", min=0.5, help="Duration of each timed benchmark (seconds)."),
+    scene: str = typer.Option(
+        scene_registry.DEFAULT_SCENE_NAME,
+        "--scene",
+        "-s",
+        help="Named scene to load for all backends.",
+    ),
     output: pathlib.Path = typer.Option(
         pathlib.Path("outputs"),
         "--output",
@@ -384,12 +424,25 @@ def compare_backends(
     """
 
     default_cfg = config.RenderConfig()
-    model_to_use = model_path or default_cfg.model_path
+
+    if model_path is not None:
+        model_to_use = model_path
+        selected_scene = "custom"
+    else:
+        try:
+            scene_info = scene_registry.get_scene_info(scene)
+        except KeyError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        model_to_use = scene_info.path
+        selected_scene = scene
+
     if not model_to_use.exists():
         console.print(
-            f"[red]Model not found at {model_to_use}. Run 'pixi run python -m src.tools.fetch_assets download' first.[/red]"
+            f"[red]Model not found at {model_to_use}. "
+            "Run 'pixi run python -m src.tools.fetch_assets download' or provide a valid --model-path.[/red]"
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=3)
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     base_dir = _prepare_output(output, f"compare_{timestamp}")
@@ -410,6 +463,7 @@ def compare_backends(
             seed=seed,
             warmup_frames=warmup_frames,
             target_fps=target_fps,
+            scene=selected_scene,
             model_path=model_to_use,
             frames_subdir=default_cfg.frames_subdir,
         )
@@ -428,6 +482,7 @@ def compare_backends(
                     "frame_dir": frame_dir,
                     "output_dir": run_dir,
                     "log_file": cfg.log_file,
+                    "scene": cfg.scene,
                 }
             )
         except rendering.BackendUnavailableError as exc:
@@ -437,6 +492,7 @@ def compare_backends(
                     "backend": backend,
                     "status": "unavailable",
                     "message": str(exc),
+                    "scene": selected_scene,
                 }
             )
         except FileNotFoundError as exc:
@@ -446,6 +502,7 @@ def compare_backends(
                     "backend": backend,
                     "status": "error",
                     "message": str(exc),
+                    "scene": selected_scene,
                 }
             )
         except Exception as exc:  # noqa: BLE001
@@ -455,6 +512,7 @@ def compare_backends(
                     "backend": backend,
                     "status": "error",
                     "message": f"Unexpected error: {exc}",
+                    "scene": selected_scene,
                 }
             )
 
@@ -475,7 +533,8 @@ def compare_backends(
             fps = f"{summary['fps']:.2f}"
             avg_sim = f"{summary['avg_sim_time_milliseconds']:.2f}"
             avg_render = f"{summary['avg_render_time_milliseconds']:.2f}"
-            notes = f"Frames: {summary['frames']}"
+            scene_label = entry.get("scene", selected_scene)
+            notes = f"Scene {scene_label}, Frames {summary['frames']}"
             table.add_row(backend.value, "ok", fps, avg_sim, avg_render, notes)
         else:
             message = entry.get("message", "n/a")
@@ -488,4 +547,13 @@ def compare_backends(
 
 
 if __name__ == "__main__":
+    import sys
+
+    argv = sys.argv[1:]
+    if not argv:
+        sys.argv = [sys.argv[0], "run"]
+    elif argv[0].startswith("-"):
+        if not (len(argv) == 1 and argv[0] in ("-h", "--help")):
+            sys.argv = [sys.argv[0], "run", *argv]
+
     app()

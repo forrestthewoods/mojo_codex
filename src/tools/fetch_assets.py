@@ -14,6 +14,8 @@ from typing import Iterable
 import httpx
 import typer
 
+from src.common import scenes as scene_registry
+
 app = typer.Typer(help="Download and manage benchmark assets")
 
 
@@ -148,6 +150,11 @@ def list_assets() -> None:
         target = ASSET_ROOT / asset.relative_path
         status = "present" if target.exists() else "missing"
         typer.echo(f"- {asset.name}: {target} ({status}) <- {asset.remote_path}")
+
+    typer.echo("\nAvailable scenes:")
+    for info in scene_registry.list_scene_infos():
+        status = "present" if info.path.exists() else "missing"
+        typer.echo(f"- {info.name}: {info.path} ({status})")
 
 
 @app.command("download")

@@ -18,7 +18,6 @@ env/
 
 # Benchmark outputs and generated assets
 outputs/
-assets/robots/panda_shadow/mjcf/assets/
 
 # Logs and temporary files
 *.log

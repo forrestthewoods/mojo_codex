@@ -58,14 +58,18 @@ class BenchmarkMetrics:
         return self.render_time / self.frames if self.frames else 0.0
 
     def summary_dict(self) -> dict[str, float]:
+        avg_sim_seconds = self.avg_sim_time
+        avg_render_seconds = self.avg_render_time
         return {
             "frames": self.frames,
             "warmup_frames": self.warmup_frames,
             "wall_time_seconds": self.wall_time,
             "simulation_time_seconds": self.sim_time,
             "render_time_seconds": self.render_time,
-            "avg_sim_time_seconds": self.avg_sim_time,
-            "avg_render_time_seconds": self.avg_render_time,
+            "avg_sim_time_seconds": avg_sim_seconds,
+            "avg_render_time_seconds": avg_render_seconds,
+            "avg_sim_time_milliseconds": avg_sim_seconds * 1000.0,
+            "avg_render_time_milliseconds": avg_render_seconds * 1000.0,
             "fps": self.fps,
             "steps_per_frame": self.steps_per_frame,
         }
@@ -225,8 +229,8 @@ def _emit_summary(metrics: BenchmarkMetrics) -> None:
     table.add_row("Wall time", fmt_seconds(summary["wall_time_seconds"]))
     table.add_row("Simulation time", fmt_seconds(summary["simulation_time_seconds"]))
     table.add_row("Render time", fmt_seconds(summary["render_time_seconds"]))
-    table.add_row("Avg sim/frame", fmt_seconds(summary["avg_sim_time_seconds"]))
-    table.add_row("Avg render/frame", fmt_seconds(summary["avg_render_time_seconds"]))
+    table.add_row("Avg sim/frame", f"{summary['avg_sim_time_milliseconds']:.2f} ms")
+    table.add_row("Avg render/frame", f"{summary['avg_render_time_milliseconds']:.2f} ms")
     table.add_row("FPS", f"{summary['fps']:.2f}")
     table.add_row("Steps per frame", str(summary["steps_per_frame"]))
 

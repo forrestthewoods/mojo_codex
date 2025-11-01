@@ -1,0 +1,30 @@
+# Python bytecode and cache directories
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build / package artifacts
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Pixi environment metadata
+.pixi/
+
+# Benchmark outputs and generated assets
+outputs/
+assets/robots/panda_shadow/mjcf/assets/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# OS-specific clutter
+.DS_Store
+Thumbs.db

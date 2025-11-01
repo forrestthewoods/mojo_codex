@@ -251,6 +251,33 @@ def _default_log_path(output_dir: pathlib.Path) -> pathlib.Path:
     return output_dir / "metrics.json"
 
 
+def _execute_benchmark(
+    cfg: config.RenderConfig,
+    *,
+    emit_summary: bool = True,
+) -> tuple[BenchmarkMetrics, Optional[pathlib.Path]]:
+    """
+    Execute a benchmark for the provided configuration.
+
+    Parameters
+    ----------
+    cfg:
+        Fully specified render configuration.
+    emit_summary:
+        Whether to render the Rich summary table for this run.
+    """
+
+    frame_dir = _frame_directory(cfg.output_dir, cfg) if cfg.save_frames else None
+    logger = logging_utils.get_logger("render_bench")
+    logger.info("Benchmark configuration:\n%s", cfg.pretty())
+
+    metrics = _run_benchmark(cfg, frame_dir)
+    if emit_summary:
+        _emit_summary(metrics)
+    _write_metrics(cfg.log_file, cfg, metrics)
+    return metrics, frame_dir
+
+
 @app.command("run")
 def run_benchmark(
     backend: config.RenderBackend = typer.Option(
@@ -309,13 +336,9 @@ def run_benchmark(
         model_path=model_to_use,
         frames_subdir=default_cfg.frames_subdir,
     )
-    frame_dir = _frame_directory(run_dir, cfg) if cfg.save_frames else None
-
-    logger = logging_utils.get_logger("render_bench")
-    logger.info("Benchmark configuration:\n%s", cfg.pretty())
 
     try:
-        metrics = _run_benchmark(cfg, frame_dir)
+        metrics, frame_dir = _execute_benchmark(cfg, emit_summary=True)
     except rendering.BackendUnavailableError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=3) from exc
@@ -323,13 +346,145 @@ def run_benchmark(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=4) from exc
 
-    _emit_summary(metrics)
-    _write_metrics(cfg.log_file, cfg, metrics)
-
     console.print(f"[green]Benchmark artifacts stored in {run_dir}[/green]")
     if cfg.save_frames and frame_dir is not None:
         console.print(f"Frames written to {frame_dir}")
     console.print(f"Metrics JSON saved to {cfg.log_file}")
+
+
+@app.command("compare")
+def compare_backends(
+    backends: list[config.RenderBackend] = typer.Option(
+        list(config.RenderBackend),
+        "--backend",
+        "-b",
+        help="Rendering backends to benchmark (can be provided multiple times).",
+    ),
+    width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
+    height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
+    duration: float = typer.Option(3.0, "--duration", "-d", min=0.5, help="Duration of each timed benchmark (seconds)."),
+    output: pathlib.Path = typer.Option(
+        pathlib.Path("outputs"),
+        "--output",
+        "-o",
+        help="Directory where comparison artifacts will be written.",
+    ),
+    save_frames: bool = typer.Option(False, "--save-frames", help="Persist rendered frames for each backend."),
+    seed: int = typer.Option(1234, "--seed", help="Random seed used for deterministic initialization."),
+    warmup_frames: int = typer.Option(30, "--warmup-frames", help="Number of warmup frames before timing."),
+    target_fps: int = typer.Option(60, "--target-fps", min=1, help="Target presentation rate (used for stepping)."),
+    model_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--model-path",
+        help="Override the MJCF model path. Defaults to the bundled Panda scene.",
+    ),
+) -> None:
+    """
+    Run the benchmark across multiple backends and display a comparison summary.
+    """
+
+    default_cfg = config.RenderConfig()
+    model_to_use = model_path or default_cfg.model_path
+    if not model_to_use.exists():
+        console.print(
+            f"[red]Model not found at {model_to_use}. Run 'pixi run python -m src.tools.fetch_assets download' first.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_dir = _prepare_output(output, f"compare_{timestamp}")
+
+    results: list[dict[str, object]] = []
+
+    for backend in backends:
+        console.print(f"[cyan]Running backend: {backend.value}[/cyan]")
+        run_dir = base_dir / backend.value
+        cfg = config.RenderConfig(
+            backend=backend,
+            width=width,
+            height=height,
+            duration=duration,
+            output_dir=run_dir,
+            log_file=_default_log_path(run_dir),
+            save_frames=save_frames,
+            seed=seed,
+            warmup_frames=warmup_frames,
+            target_fps=target_fps,
+            model_path=model_to_use,
+            frames_subdir=default_cfg.frames_subdir,
+        )
+
+        try:
+            metrics, frame_dir = _execute_benchmark(cfg, emit_summary=False)
+            console.print(f"[green]Completed {backend.value} backend[/green]")
+            console.print(f"  Metrics: {cfg.log_file}")
+            if cfg.save_frames and frame_dir is not None:
+                console.print(f"  Frames : {frame_dir}")
+            results.append(
+                {
+                    "backend": backend,
+                    "status": "success",
+                    "metrics": metrics,
+                    "frame_dir": frame_dir,
+                    "output_dir": run_dir,
+                    "log_file": cfg.log_file,
+                }
+            )
+        except rendering.BackendUnavailableError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            results.append(
+                {
+                    "backend": backend,
+                    "status": "unavailable",
+                    "message": str(exc),
+                }
+            )
+        except FileNotFoundError as exc:
+            console.print(f"[red]{exc}[/red]")
+            results.append(
+                {
+                    "backend": backend,
+                    "status": "error",
+                    "message": str(exc),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Unexpected error while running {backend.value}: {exc}[/red]")
+            results.append(
+                {
+                    "backend": backend,
+                    "status": "error",
+                    "message": f"Unexpected error: {exc}",
+                }
+            )
+
+    table = Table(title="Backend Comparison", show_header=True, header_style="bold")
+    table.add_column("Backend", justify="left")
+    table.add_column("Status", justify="left")
+    table.add_column("FPS", justify="right")
+    table.add_column("Avg sim (ms)", justify="right")
+    table.add_column("Avg render (ms)", justify="right")
+    table.add_column("Notes", justify="left")
+
+    for entry in results:
+        backend = entry["backend"]
+        status = entry["status"]
+        if status == "success":
+            metrics = entry["metrics"]
+            summary = metrics.summary_dict()
+            fps = f"{summary['fps']:.2f}"
+            avg_sim = f"{summary['avg_sim_time_milliseconds']:.2f}"
+            avg_render = f"{summary['avg_render_time_milliseconds']:.2f}"
+            notes = f"Frames: {summary['frames']}"
+            table.add_row(backend.value, "ok", fps, avg_sim, avg_render, notes)
+        else:
+            message = entry.get("message", "n/a")
+            table.add_row(backend.value, str(status), "-", "-", "-", message)
+
+    console.print(table)
+    console.print(f"[green]Comparison artifacts stored in {base_dir}[/green]")
+    if save_frames:
+        console.print("Frame directories are nested under each backend subfolder.")
 
 
 if __name__ == "__main__":

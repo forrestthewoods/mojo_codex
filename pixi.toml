@@ -1,0 +1,44 @@
+[project]
+name = "mujoco-render-bench"
+version = "0.1.0"
+description = "MuJoCo rendering benchmark playground for robotics visualization research"
+authors = ["Research Team <research@example.com>"]
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[dependencies]
+python = "3.11.*"
+mujoco = ">=3.1,<3.2"
+numpy = ">=1.26,<3"
+typer = ">=0.9,<0.10"
+rich = ">=13.7,<14"
+imageio = ">=2.34,<3"
+pillow = ">=10,<11"
+glfw = ">=3.4,<4"
+orjson = ">=3.10,<4"
+httpx = ">=0.27,<0.28"
+
+[feature.dev.dependencies]
+ipython = ">=8.21,<9"
+black = ">=24.4,<25"
+ruff = ">=0.4,<0.5"
+
+[tasks.bench]
+cmd = "python -m src.benchmarks.render_bench"
+description = "Run the render benchmark with default settings"
+
+[tasks.bench-cpu]
+cmd = "python -m src.benchmarks.render_bench --backend cpu"
+description = "Benchmark using the CPU renderer"
+
+[tasks.bench-opengl]
+cmd = "python -m src.benchmarks.render_bench --backend opengl"
+description = "Benchmark using the OpenGL renderer"
+
+[tasks.bench-egl]
+cmd = "python -m src.benchmarks.render_bench --backend egl"
+description = "Benchmark using the EGL renderer (if available)"
+
+[tasks.fetch-assets]
+cmd = "python -m src.tools.fetch_assets"
+description = "Download MuJoCo asset files (requires network access)"

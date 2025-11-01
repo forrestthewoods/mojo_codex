@@ -11,7 +11,6 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 import time
-from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
 
 import imageio.v3 as iio
@@ -20,7 +19,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from src.backends import madrona_runner
+from src.backends.madrona_runner import MadronaIntegrationError
 from src.common import config, logging_utils, rendering, scenes as scene_registry
+from src.common.results import BenchmarkMetrics
 
 if TYPE_CHECKING:
     import mujoco  # pragma: no cover
@@ -29,58 +31,6 @@ app = typer.Typer(help="MuJoCo rendering benchmark harness")
 
 
 console = Console()
-
-
-@dataclass
-class BenchmarkMetrics:
-    """Aggregated statistics for a benchmark run."""
-
-    frames: int
-    warmup_frames: int
-    wall_time: float
-    sim_time: float
-    render_time: float
-    per_frame: list[dict[str, float]]
-    started_at: dt.datetime
-    completed_at: dt.datetime
-    steps_per_frame: int
-
-    @property
-    def fps(self) -> float:
-        return self.frames / self.wall_time if self.wall_time > 0 and self.frames else 0.0
-
-    @property
-    def avg_sim_time(self) -> float:
-        return self.sim_time / self.frames if self.frames else 0.0
-
-    @property
-    def avg_render_time(self) -> float:
-        return self.render_time / self.frames if self.frames else 0.0
-
-    def summary_dict(self) -> dict[str, float]:
-        avg_sim_seconds = self.avg_sim_time
-        avg_render_seconds = self.avg_render_time
-        return {
-            "frames": self.frames,
-            "warmup_frames": self.warmup_frames,
-            "wall_time_seconds": self.wall_time,
-            "simulation_time_seconds": self.sim_time,
-            "render_time_seconds": self.render_time,
-            "avg_sim_time_seconds": avg_sim_seconds,
-            "avg_render_time_seconds": avg_render_seconds,
-            "avg_sim_time_milliseconds": avg_sim_seconds * 1000.0,
-            "avg_render_time_milliseconds": avg_render_seconds * 1000.0,
-            "fps": self.fps,
-            "steps_per_frame": self.steps_per_frame,
-        }
-
-    def serialize(self) -> dict[str, object]:
-        return {
-            "summary": self.summary_dict(),
-            "per_frame": self.per_frame,
-            "started_at": self.started_at.isoformat(),
-            "completed_at": self.completed_at.isoformat(),
-        }
 
 
 def _prepare_output(base_output: pathlib.Path, timestamp: str) -> pathlib.Path:
@@ -133,7 +83,7 @@ def _warmup(
         _apply_controls(sim.data, control_phases, frame_idx)
         for _ in range(steps):
             mj.mj_step(sim.model, sim.data)
-        sim.renderer.update_scene(sim.data)
+        sim.renderer.update_scene(sim.data)  # type: ignore[union-attr]
         sim.renderer.render()
 
 
@@ -267,10 +217,27 @@ def _execute_benchmark(
         Whether to render the Rich summary table for this run.
     """
 
-    frame_dir = _frame_directory(cfg.output_dir, cfg) if cfg.save_frames else None
     logger = logging_utils.get_logger("render_bench")
     logger.info("Benchmark configuration:\n%s", cfg.pretty())
 
+    if cfg.backend == config.RenderBackend.MADRONA:
+        precreated_frame_dir: Optional[pathlib.Path] = None
+        if cfg.save_frames:
+            precreated_frame_dir = _frame_directory(cfg.output_dir, cfg)
+
+        try:
+            metrics, frame_dir = madrona_runner.run(cfg)
+        except MadronaIntegrationError as exc:
+            raise rendering.BackendUnavailableError(str(exc)) from exc
+
+        if cfg.save_frames and frame_dir is None:
+            frame_dir = precreated_frame_dir
+        if emit_summary:
+            _emit_summary(metrics)
+        _write_metrics(cfg.log_file, cfg, metrics)
+        return metrics, frame_dir
+
+    frame_dir = _frame_directory(cfg.output_dir, cfg) if cfg.save_frames else None
     metrics = _run_benchmark(cfg, frame_dir)
     if emit_summary:
         _emit_summary(metrics)
@@ -309,6 +276,21 @@ def run_benchmark(
         None,
         "--model-path",
         help="Override the MJCF model path. Defaults to the bundled Panda scene.",
+    ),
+    madrona_module: Optional[str] = typer.Option(
+        None,
+        "--madrona-module",
+        help="Python module that exposes a Madrona benchmark runner.",
+    ),
+    madrona_function: str = typer.Option(
+        "run_benchmark",
+        "--madrona-function",
+        help="Function inside the Madrona runner module to invoke.",
+    ),
+    madrona_config: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--madrona-config",
+        help="Optional configuration file or directory passed to the Madrona runner.",
     ),
 ) -> None:
     """
@@ -354,6 +336,9 @@ def run_benchmark(
         scene=selected_scene,
         model_path=model_to_use,
         frames_subdir=default_cfg.frames_subdir,
+        madrona_module=madrona_module,
+        madrona_function=madrona_function,
+        madrona_config=madrona_config,
     )
 
     try:
@@ -418,6 +403,21 @@ def compare_backends(
         "--model-path",
         help="Override the MJCF model path. Defaults to the bundled Panda scene.",
     ),
+    madrona_module: Optional[str] = typer.Option(
+        None,
+        "--madrona-module",
+        help="Python module that exposes a Madrona benchmark runner.",
+    ),
+    madrona_function: str = typer.Option(
+        "run_benchmark",
+        "--madrona-function",
+        help="Function inside the Madrona runner module to invoke.",
+    ),
+    madrona_config: Optional[pathlib.Path] = typer.Option(
+        None,
+        "--madrona-config",
+        help="Optional configuration file or directory passed to the Madrona runner.",
+    ),
 ) -> None:
     """
     Run the benchmark across multiple backends and display a comparison summary.
@@ -466,6 +466,9 @@ def compare_backends(
             scene=selected_scene,
             model_path=model_to_use,
             frames_subdir=default_cfg.frames_subdir,
+            madrona_module=madrona_module,
+            madrona_function=madrona_function,
+            madrona_config=madrona_config,
         )
 
         try:

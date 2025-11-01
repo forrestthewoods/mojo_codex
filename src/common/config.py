@@ -12,11 +12,12 @@ from typing import Optional
 from . import scenes
 
 class RenderBackend(str, Enum):
-    """Supported MuJoCo rendering backends."""
+    """Supported rendering backends."""
 
     CPU = "cpu"
     OPENGL = "opengl"
     EGL = "egl"
+    MADRONA = "madrona"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,9 @@ class RenderConfig:
     target_fps: int = 60
     model_path: pathlib.Path = scenes.get_scene_info(scenes.DEFAULT_SCENE_NAME).path
     frames_subdir: str = "frames"
+    madrona_module: Optional[str] = None
+    madrona_function: str = "run_benchmark"
+    madrona_config: Optional[pathlib.Path] = None
 
     def as_dict(self) -> dict:
         """Return a JSON-friendly representation of the configuration."""
@@ -46,6 +50,8 @@ class RenderConfig:
         if self.log_file is not None:
             data["log_file"] = str(self.log_file)
         data["model_path"] = str(self.model_path)
+        if self.madrona_config is not None:
+            data["madrona_config"] = str(self.madrona_config)
         return data
 
     def pretty(self) -> str:
@@ -63,6 +69,9 @@ class RenderConfig:
             f"  scene        : {self.scene}",
             f"  model_path   : {self.model_path}",
             f"  seed         : {self.seed}",
+            f"  madrona_mod  : {self.madrona_module or '<unset>'}",
+            f"  madrona_func : {self.madrona_function}",
+            f"  madrona_cfg  : {self.madrona_config or '<unset>'}",
         ]
         return "\n".join(["RenderConfig("] + lines + [")"])
 

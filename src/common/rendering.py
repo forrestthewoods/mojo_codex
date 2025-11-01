@@ -30,6 +30,7 @@ _BACKEND_ENVIRONMENT = {
     RenderBackend.OPENGL: "glfw" if _SYSTEM != "Windows" else "glfw",
     RenderBackend.CPU: "osmesa",
     RenderBackend.EGL: "egl",
+    RenderBackend.MADRONA: None,
 }
 
 
@@ -63,13 +64,15 @@ class SimulationResources:
 def _configure_backend(backend: RenderBackend) -> None:
     """Ensure MUJOCO_GL is configured for the selected backend."""
 
-    desired = _BACKEND_ENVIRONMENT[backend]
-
     if backend == RenderBackend.CPU and _SYSTEM != "Linux":
         raise BackendUnavailableError("CPU backend is only supported on Linux via OSMesa.")
 
     if backend == RenderBackend.EGL and _SYSTEM != "Linux":
         raise BackendUnavailableError("EGL backend is only supported on Linux.")
+
+    desired = _BACKEND_ENVIRONMENT.get(backend)
+    if desired is None:
+        return
 
     current_value = os.environ.get("MUJOCO_GL", "").lower()
     if desired and current_value != desired:

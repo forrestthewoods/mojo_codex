@@ -566,13 +566,19 @@ def compare_backends(
 
 
 if __name__ == "__main__":
+    import os
     import sys
 
     argv = sys.argv[1:]
+    if os.environ.get("BENCH_DEBUG_ARGS"):
+        console.print(f"[yellow]Raw argv: {sys.argv}[/yellow]")
+
     if not argv:
         sys.argv = [sys.argv[0], "run"]
     elif argv[0].startswith("-"):
         if not (len(argv) == 1 and argv[0] in ("-h", "--help")):
             sys.argv = [sys.argv[0], "run", *argv]
+        if os.environ.get("BENCH_DEBUG_ARGS"):
+            console.print(f"[yellow]Rewritten argv: {sys.argv}[/yellow]")
 
     app()

@@ -373,11 +373,12 @@ def list_scenes() -> None:
 
 @app.command("compare")
 def compare_backends(
-    backends: Optional[List[str]] = typer.Option(
-        None,
+    backends: List[str] = typer.Option(
+        [],
         "--backend",
         "-b",
         help="Rendering backends to benchmark (repeat to specify multiple). Defaults to all available backends.",
+        show_default=False,
     ),
     width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
     height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
@@ -426,7 +427,7 @@ def compare_backends(
     default_cfg = config.RenderConfig()
     if backends:
         try:
-            backends_to_run = [config.RenderBackend(value) for value in backends]
+            backends_to_run = [config.RenderBackend(value.lower()) for value in backends]
         except ValueError as exc:
             available = ", ".join(rb.value for rb in config.RenderBackend)
             raise typer.BadParameter(

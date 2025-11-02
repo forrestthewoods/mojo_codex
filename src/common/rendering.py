@@ -118,8 +118,12 @@ def create_renderer(mujoco_module: "mujoco", model: "mujoco.MjModel", cfg: Rende
             height=cfg.height,
             width=cfg.width,
         )
-    except mujoco_module.Error as exc:  # type: ignore[attr-defined]
-        raise BackendUnavailableError(f"Failed to initialize renderer for backend {cfg.backend.value}: {exc}") from exc
+    except Exception as exc:
+        # Older MuJoCo wheels do not expose mujoco.Error in the Python API.
+        backend_err = (
+            f"Failed to initialize renderer for backend {cfg.backend.value}: {exc}"
+        )
+        raise BackendUnavailableError(backend_err) from exc
 
     return renderer
 

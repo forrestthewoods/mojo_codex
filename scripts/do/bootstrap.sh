@@ -27,6 +27,9 @@ fi
 
 export PATH="${HOME}/.pixi/bin:${PATH}"
 
+# Ensure the workspace knows about Linux binaries (required on fresh installs)
+pixi workspace platform add linux-64
+
 # Set up the local Pixi environment (installs Python + dependencies)
 pixi install
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 import time
-from typing import Any, Optional, TYPE_CHECKING, List
+from typing import Any, Optional, TYPE_CHECKING, Tuple
 
 import imageio.v3 as iio
 import numpy as np
@@ -373,12 +373,13 @@ def list_scenes() -> None:
 
 @app.command("compare")
 def compare_backends(
-    backends: List[str] = typer.Option(
-        [],
+    backends: Optional[Tuple[str, ...]] = typer.Option(
+        None,
         "--backend",
         "-b",
         help="Rendering backends to benchmark (repeat to specify multiple). Defaults to all available backends.",
         show_default=False,
+        multiple=True,
     ),
     width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
     height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),

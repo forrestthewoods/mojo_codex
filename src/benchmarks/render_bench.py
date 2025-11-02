@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 import time
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, List
 
 import imageio.v3 as iio
 import numpy as np
@@ -373,11 +373,11 @@ def list_scenes() -> None:
 
 @app.command("compare")
 def compare_backends(
-    backends: list[config.RenderBackend] = typer.Option(
-        list(config.RenderBackend),
+    backends: Optional[List[str]] = typer.Option(
+        None,
         "--backend",
         "-b",
-        help="Rendering backends to benchmark (can be provided multiple times).",
+        help="Rendering backends to benchmark (repeat to specify multiple). Defaults to all available backends.",
     ),
     width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
     height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
@@ -424,6 +424,21 @@ def compare_backends(
     """
 
     default_cfg = config.RenderConfig()
+    if backends:
+        try:
+            backends_to_run = [config.RenderBackend(value) for value in backends]
+        except ValueError as exc:
+            available = ", ".join(rb.value for rb in config.RenderBackend)
+            raise typer.BadParameter(
+                f"Unknown backend value. Available options: {available}"
+            ) from exc
+    else:
+        backends_to_run = [
+            config.RenderBackend.CPU,
+            config.RenderBackend.OPENGL,
+            config.RenderBackend.EGL,
+            config.RenderBackend.MADRONA,
+        ]
 
     if model_path is not None:
         model_to_use = model_path
@@ -449,7 +464,7 @@ def compare_backends(
 
     results: list[dict[str, object]] = []
 
-    for backend in backends:
+    for backend in backends_to_run:
         console.print(f"[cyan]Running backend: {backend.value}[/cyan]")
         run_dir = base_dir / backend.value
         cfg = config.RenderConfig(

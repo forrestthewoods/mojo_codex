@@ -74,6 +74,18 @@ pixi run python -m src.benchmarks.render_bench \
   --save-frames
 ```
 
+To compare backends explicitly (e.g., CPU only on a droplet), remember to repeat `--backend` for each one you want to include:
+
+```bash
+pixi run python -m src.benchmarks.render_bench compare \
+  --backend cpu \
+  --duration 0.5 \
+  --warmup-frames 0 \
+  --target-fps 30 \
+  --width 256 \
+  --height 256
+```
+
 ## 4. Collect Results
 
 Download outputs back to your workstation (from your local machine):

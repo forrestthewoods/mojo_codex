@@ -1,3 +1,6 @@
+# run commands
+pixi run python -m src.benchmarks.render_bench compare --duration 0.5 --warmup-frames 0 --target-fps 30 --width 256 --height 256
+
 # commit and push git
 git add . && git commit -m "progress" && git push
 

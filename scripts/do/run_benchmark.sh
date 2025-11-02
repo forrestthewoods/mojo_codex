@@ -11,7 +11,7 @@ export PATH="${HOME}/.pixi/bin:${PATH}"
 
 OUTPUT_DIR="${1:-outputs/do_run}"
 
-pixi run python -m src.benchmarks.render_bench \
+pixi run -- python -m src.benchmarks.render_bench \
     --backend cpu \
     --scene workbench \
     --duration 5 \

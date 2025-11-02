@@ -8,14 +8,16 @@ rendering stages.
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
+import os
 import pathlib
+import sys
 import time
-from typing import Any, Optional, TYPE_CHECKING, Tuple
+from typing import Any, Optional, TYPE_CHECKING
 
 import imageio.v3 as iio
 import numpy as np
-import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -26,9 +28,6 @@ from src.common.results import BenchmarkMetrics
 
 if TYPE_CHECKING:
     import mujoco  # pragma: no cover
-
-app = typer.Typer(help="MuJoCo rendering benchmark harness")
-
 
 console = Console()
 
@@ -245,70 +244,34 @@ def _execute_benchmark(
     return metrics, frame_dir
 
 
-@app.command("run")
-def run_benchmark(
-    backend: config.RenderBackend = typer.Option(
-        config.RenderBackend.OPENGL, "--backend", "-b", help="Rendering backend to benchmark."
-    ),
-    width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
-    height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
-    duration: float = typer.Option(3.0, "--duration", "-d", min=0.5, help="Duration of the timed benchmark (seconds)."),
-    scene: str = typer.Option(
-        scene_registry.DEFAULT_SCENE_NAME,
-        "--scene",
-        "-s",
-        help="Named scene to load (see the 'scenes' command).",
-    ),
-    output: pathlib.Path = typer.Option(
-        pathlib.Path("outputs"),
-        "--output",
-        "-o",
-        help="Base directory where benchmark artifacts will be written.",
-    ),
-    log_file: Optional[pathlib.Path] = typer.Option(
-        None, "--log-file", help="Explicit path for the metrics JSON output."
-    ),
-    save_frames: bool = typer.Option(False, "--save-frames", help="Persist rendered frames to disk."),
-    seed: int = typer.Option(1234, "--seed", help="Random seed used for deterministic initialization."),
-    warmup_frames: int = typer.Option(30, "--warmup-frames", help="Number of warmup frames before timing."),
-    target_fps: int = typer.Option(60, "--target-fps", min=1, help="Target presentation rate (used for stepping)."),
-    model_path: Optional[pathlib.Path] = typer.Option(
-        None,
-        "--model-path",
-        help="Override the MJCF model path. Defaults to the bundled Panda scene.",
-    ),
-    madrona_module: Optional[str] = typer.Option(
-        None,
-        "--madrona-module",
-        help="Python module that exposes a Madrona benchmark runner.",
-    ),
-    madrona_function: str = typer.Option(
-        "run_benchmark",
-        "--madrona-function",
-        help="Function inside the Madrona runner module to invoke.",
-    ),
-    madrona_config: Optional[pathlib.Path] = typer.Option(
-        None,
-        "--madrona-config",
-        help="Optional configuration file or directory passed to the Madrona runner.",
-    ),
-) -> None:
-    """
-    Run the MuJoCo rendering benchmark with the provided settings.
-    """
+def _parse_backend(value: str) -> config.RenderBackend:
+    try:
+        return config.RenderBackend(value.lower())
+    except ValueError as exc:
+        available = ", ".join(rb.value for rb in config.RenderBackend)
+        raise ValueError(f"Unknown backend '{value}'. Available options: {available}") from exc
 
+
+def run_command(args: argparse.Namespace) -> int:
     default_cfg = config.RenderConfig()
-    selected_scene = scene
 
-    if model_path is not None:
-        model_to_use = model_path
+    try:
+        backend = _parse_backend(args.backend)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+
+    selected_scene = args.scene
+    model_override = args.model_path
+    if model_override is not None:
+        model_to_use = model_override.expanduser()
         selected_scene = "custom"
     else:
         try:
-            scene_info = scene_registry.get_scene_info(scene)
+            scene_info = scene_registry.get_scene_info(selected_scene)
         except KeyError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=2) from exc
+            return 2
         model_to_use = scene_info.path
 
     if not model_to_use.exists():
@@ -316,50 +279,49 @@ def run_benchmark(
             f"[red]Model not found at {model_to_use}. "
             "Run 'pixi run python -m src.tools.fetch_assets download' or provide a valid --model-path.[/red]"
         )
-        raise typer.Exit(code=3)
+        return 3
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = _prepare_output(output, timestamp)
-    log_path = log_file if log_file is not None else _default_log_path(run_dir)
+    output_base = args.output.expanduser()
+    run_dir = _prepare_output(output_base, timestamp)
+    log_path = args.log_file.expanduser() if args.log_file is not None else _default_log_path(run_dir)
 
     cfg = config.RenderConfig(
         backend=backend,
-        width=width,
-        height=height,
-        duration=duration,
+        width=args.width,
+        height=args.height,
+        duration=args.duration,
         output_dir=run_dir,
         log_file=log_path,
-        save_frames=save_frames,
-        seed=seed,
-        warmup_frames=warmup_frames,
-        target_fps=target_fps,
+        save_frames=args.save_frames,
+        seed=args.seed,
+        warmup_frames=args.warmup_frames,
+        target_fps=args.target_fps,
         scene=selected_scene,
         model_path=model_to_use,
         frames_subdir=default_cfg.frames_subdir,
-        madrona_module=madrona_module,
-        madrona_function=madrona_function,
-        madrona_config=madrona_config,
+        madrona_module=args.madrona_module,
+        madrona_function=args.madrona_function,
+        madrona_config=args.madrona_config.expanduser() if args.madrona_config else None,
     )
 
     try:
         metrics, frame_dir = _execute_benchmark(cfg, emit_summary=True)
     except rendering.BackendUnavailableError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=4) from exc
+        return 4
     except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=5) from exc
+        return 5
 
     console.print(f"[green]Benchmark artifacts stored in {run_dir}[/green]")
     if cfg.save_frames and frame_dir is not None:
         console.print(f"Frames written to {frame_dir}")
     console.print(f"Metrics JSON saved to {cfg.log_file}")
+    return 0
 
 
-@app.command("scenes")
-def list_scenes() -> None:
-    """List available benchmark scenes."""
-
+def scenes_command(args: argparse.Namespace) -> int:
     table = Table(title="Available Scenes", show_header=True, header_style="bold")
     table.add_column("Scene", justify="left")
     table.add_column("MJCF Path", justify="left")
@@ -369,71 +331,39 @@ def list_scenes() -> None:
         table.add_row(info.name, str(info.path), info.description)
 
     console.print(table)
+    return 0
 
 
-@app.command("compare")
-def compare_backends(
-    backends: Optional[Tuple[str, ...]] = typer.Option(
-        None,
-        "--backend",
-        "-b",
-        help="Rendering backends to benchmark (repeat to specify multiple). Defaults to all available backends.",
-        show_default=False,
-        multiple=True,
-    ),
-    width: int = typer.Option(1280, "--width", "-w", min=64, help="Width of the render output."),
-    height: int = typer.Option(720, "--height", "-h", min=64, help="Height of the render output."),
-    duration: float = typer.Option(3.0, "--duration", "-d", min=0.5, help="Duration of each timed benchmark (seconds)."),
-    scene: str = typer.Option(
-        scene_registry.DEFAULT_SCENE_NAME,
-        "--scene",
-        "-s",
-        help="Named scene to load for all backends.",
-    ),
-    output: pathlib.Path = typer.Option(
-        pathlib.Path("outputs"),
-        "--output",
-        "-o",
-        help="Directory where comparison artifacts will be written.",
-    ),
-    save_frames: bool = typer.Option(False, "--save-frames", help="Persist rendered frames for each backend."),
-    seed: int = typer.Option(1234, "--seed", help="Random seed used for deterministic initialization."),
-    warmup_frames: int = typer.Option(30, "--warmup-frames", help="Number of warmup frames before timing."),
-    target_fps: int = typer.Option(60, "--target-fps", min=1, help="Target presentation rate (used for stepping)."),
-    model_path: Optional[pathlib.Path] = typer.Option(
-        None,
-        "--model-path",
-        help="Override the MJCF model path. Defaults to the bundled Panda scene.",
-    ),
-    madrona_module: Optional[str] = typer.Option(
-        None,
-        "--madrona-module",
-        help="Python module that exposes a Madrona benchmark runner.",
-    ),
-    madrona_function: str = typer.Option(
-        "run_benchmark",
-        "--madrona-function",
-        help="Function inside the Madrona runner module to invoke.",
-    ),
-    madrona_config: Optional[pathlib.Path] = typer.Option(
-        None,
-        "--madrona-config",
-        help="Optional configuration file or directory passed to the Madrona runner.",
-    ),
-) -> None:
-    """
-    Run the benchmark across multiple backends and display a comparison summary.
-    """
-
+def compare_command(args: argparse.Namespace) -> int:
     default_cfg = config.RenderConfig()
-    if backends:
+
+    model_override = args.model_path
+    selected_scene = args.scene
+    if model_override is not None:
+        model_to_use = model_override.expanduser()
+        selected_scene = "custom"
+    else:
         try:
-            backends_to_run = [config.RenderBackend(value.lower()) for value in backends]
+            scene_info = scene_registry.get_scene_info(selected_scene)
+        except KeyError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+        model_to_use = scene_info.path
+
+    if not model_to_use.exists():
+        console.print(
+            f"[red]Model not found at {model_to_use}. "
+            "Run 'pixi run python -m src.tools.fetch_assets download' or provide a valid --model-path.[/red]"
+        )
+        return 3
+
+    backend_args = list(args.backend) if args.backend else []
+    if backend_args:
+        try:
+            backends_to_run = [_parse_backend(value) for value in backend_args]
         except ValueError as exc:
-            available = ", ".join(rb.value for rb in config.RenderBackend)
-            raise typer.BadParameter(
-                f"Unknown backend value. Available options: {available}"
-            ) from exc
+            console.print(f"[red]{exc}[/red]")
+            return 2
     else:
         backends_to_run = [
             config.RenderBackend.CPU,
@@ -442,27 +372,8 @@ def compare_backends(
             config.RenderBackend.MADRONA,
         ]
 
-    if model_path is not None:
-        model_to_use = model_path
-        selected_scene = "custom"
-    else:
-        try:
-            scene_info = scene_registry.get_scene_info(scene)
-        except KeyError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=2) from exc
-        model_to_use = scene_info.path
-        selected_scene = scene
-
-    if not model_to_use.exists():
-        console.print(
-            f"[red]Model not found at {model_to_use}. "
-            "Run 'pixi run python -m src.tools.fetch_assets download' or provide a valid --model-path.[/red]"
-        )
-        raise typer.Exit(code=3)
-
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_dir = _prepare_output(output, f"compare_{timestamp}")
+    base_dir = _prepare_output(args.output.expanduser(), f"compare_{timestamp}")
 
     results: list[dict[str, object]] = []
 
@@ -471,21 +382,21 @@ def compare_backends(
         run_dir = base_dir / backend.value
         cfg = config.RenderConfig(
             backend=backend,
-            width=width,
-            height=height,
-            duration=duration,
+            width=args.width,
+            height=args.height,
+            duration=args.duration,
             output_dir=run_dir,
             log_file=_default_log_path(run_dir),
-            save_frames=save_frames,
-            seed=seed,
-            warmup_frames=warmup_frames,
-            target_fps=target_fps,
+            save_frames=args.save_frames,
+            seed=args.seed,
+            warmup_frames=args.warmup_frames,
+            target_fps=args.target_fps,
             scene=selected_scene,
             model_path=model_to_use,
             frames_subdir=default_cfg.frames_subdir,
-            madrona_module=madrona_module,
-            madrona_function=madrona_function,
-            madrona_config=madrona_config,
+            madrona_module=args.madrona_module,
+            madrona_function=args.madrona_function,
+            madrona_config=args.madrona_config.expanduser() if args.madrona_config else None,
         )
 
         try:
@@ -562,24 +473,149 @@ def compare_backends(
 
     console.print(table)
     console.print(f"[green]Comparison artifacts stored in {base_dir}[/green]")
-    if save_frames:
+    if args.save_frames:
         console.print("Frame directories are nested under each backend subfolder.")
+
+    return 0
+
+
+def add_scene_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--scene",
+        "-s",
+        default=scene_registry.DEFAULT_SCENE_NAME,
+        help="Named scene to load (see the 'scenes' command).",
+    )
+    parser.add_argument("--width", "-w", type=int, default=1280, metavar="PIXELS", help="Width of the render output.")
+    parser.add_argument(
+        "--height", "-H", type=int, default=720, metavar="PIXELS", help="Height of the render output."
+    )
+    parser.add_argument(
+        "--duration",
+        "-d",
+        type=float,
+        default=3.0,
+        metavar="SECONDS",
+        help="Duration of the timed benchmark.",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=pathlib.Path,
+        default=pathlib.Path("outputs"),
+        help="Base directory where benchmark artifacts will be written.",
+    )
+    parser.add_argument(
+        "--save-frames",
+        action="store_true",
+        help="Persist rendered frames to disk.",
+    )
+    parser.add_argument("--seed", type=int, default=1234, help="Random seed used for deterministic initialization.")
+    parser.add_argument(
+        "--warmup-frames",
+        type=int,
+        default=30,
+        help="Number of warmup frames before timing begins.",
+    )
+    parser.add_argument(
+        "--target-fps",
+        type=int,
+        default=60,
+        help="Target presentation rate (used for stepping).",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=pathlib.Path,
+        help="Override the MJCF model path. Defaults to the bundled Panda scene.",
+    )
+    parser.add_argument(
+        "--madrona-module",
+        type=str,
+        help="Python module that exposes a Madrona benchmark runner.",
+    )
+    parser.add_argument(
+        "--madrona-function",
+        type=str,
+        default="run_benchmark",
+        help="Function inside the Madrona runner module to invoke.",
+    )
+    parser.add_argument(
+        "--madrona-config",
+        type=pathlib.Path,
+        help="Optional configuration file or directory passed to the Madrona runner.",
+    )
+
+
+def add_run_arguments(parser: argparse.ArgumentParser) -> None:
+    backend_choices = [rb.value for rb in config.RenderBackend]
+    parser.add_argument(
+        "--backend",
+        "-b",
+        choices=backend_choices,
+        default=config.RenderBackend.OPENGL.value,
+        help="Rendering backend to benchmark.",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=pathlib.Path,
+        help="Explicit path for the metrics JSON output.",
+    )
+    add_scene_arguments(parser)
+
+
+def add_compare_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--backend",
+        "-b",
+        action="append",
+        default=None,
+        help="Rendering backends to benchmark (repeat to specify multiple). Defaults to all available backends.",
+    )
+    add_scene_arguments(parser)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="MuJoCo rendering benchmark harness")
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Run the render benchmark with specific settings.")
+    add_run_arguments(run_parser)
+    run_parser.set_defaults(func=run_command)
+
+    compare_parser = subparsers.add_parser(
+        "compare", help="Run the benchmark across multiple backends and display a comparison summary."
+    )
+    add_compare_arguments(compare_parser)
+    compare_parser.set_defaults(func=compare_command)
+
+    scenes_parser = subparsers.add_parser("scenes", help="List available benchmark scenes.")
+    scenes_parser.set_defaults(func=scenes_command)
+
+    return parser
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+
+    debug = bool(os.environ.get("BENCH_DEBUG_ARGS"))
+    if debug:
+        console.print(f"[yellow]Raw argv: {[sys.argv[0], *argv]}[/yellow]")
+
+    command_names = {"run", "compare", "scenes"}
+    if not argv or argv[0] not in command_names:
+        argv = ["run", *argv]
+        if debug:
+            console.print(f"[yellow]Rewritten argv: {[sys.argv[0], *argv]}[/yellow]")
+
+    args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 0
+
+    return args.func(args)
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    argv = sys.argv[1:]
-    if os.environ.get("BENCH_DEBUG_ARGS"):
-        console.print(f"[yellow]Raw argv: {sys.argv}[/yellow]")
-
-    if not argv:
-        sys.argv = [sys.argv[0], "run"]
-    elif argv[0].startswith("-"):
-        if not (len(argv) == 1 and argv[0] in ("-h", "--help")):
-            sys.argv = [sys.argv[0], "run", *argv]
-        if os.environ.get("BENCH_DEBUG_ARGS"):
-            console.print(f"[yellow]Rewritten argv: {sys.argv}[/yellow]")
-
-    app()
+    sys.exit(main())

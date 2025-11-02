@@ -63,7 +63,7 @@ The command above:
 Feel free to run customized commands instead. Example (longer run, no frames):
 
 ```bash
-pixi run python -m src.benchmarks.render_bench \
+pixi run -- python -m src.benchmarks.render_bench \
   --backend cpu \
   --scene apartment \
   --duration 10 \
@@ -77,7 +77,7 @@ pixi run python -m src.benchmarks.render_bench \
 To compare backends explicitly (e.g., CPU only on a droplet), remember to repeat `--backend` for each one you want to include:
 
 ```bash
-pixi run python -m src.benchmarks.render_bench compare \
+pixi run -- python -m src.benchmarks.render_bench compare \
   --backend cpu \
   --duration 0.5 \
   --warmup-frames 0 \
@@ -108,7 +108,7 @@ Once you have copied the necessary data:
 If you prefer running through Pixi tasks instead of shell scripts, the following command is equivalent to `scripts/do/run_benchmark.sh`:
 
 ```bash
-pixi run python -m src.benchmarks.render_bench --backend cpu --scene workbench \
+pixi run -- python -m src.benchmarks.render_bench --backend cpu --scene workbench \
   --duration 5 --width 640 --height 480 --output outputs/do_run --save-frames
 ```
 

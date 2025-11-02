@@ -11,6 +11,7 @@ This file tracks the project status so progress can resume after environment res
 - Rendering benchmark CLI operational for the OpenGL backend; sample run produces timing metrics and JSON output under `outputs/<timestamp>/`.
 - Scene registry added with default `workbench` (menagerie) scene and new `apartment` interior MJCF; CLI exposes `--scene` flag and `scenes`/`compare` commands for discovery and benchmarking.
 - Madrona backend scaffolding created: configuration fields and CLI flags added, with a plugin-style runner interface (`src/backends/madrona_runner.py`) and example stub.
+- DigitalOcean helpers added (`scripts/do/bootstrap.sh`, `scripts/do/run_benchmark.sh`, `docs/cloud/digitalocean.md`) for manual droplet-based benchmarking.
 
 ## Immediate Next Actions
 1. **Create documentation**

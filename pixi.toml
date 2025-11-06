@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "MuJoCo rendering benchmark playground for robotics visualization research"
 authors = ["Research Team <research@example.com>"]
 channels = ["conda-forge"]
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64"]
 
 [dependencies]
 python = "3.11.*"

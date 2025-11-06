@@ -52,7 +52,18 @@ class SimulationResources:
         """Release renderer resources."""
 
         if self.renderer is not None:
-            self.renderer.close()
+            try:
+                self.renderer.close()
+            except (AttributeError, TypeError) as exc:
+                # In CPU mode (OSMEsage), OpenGL context may not be fully initialized
+                # and closing the renderer can fail with AttributeError or TypeError
+                # This is safe to ignore as teh resources will be cleaned up anyway.
+                import warnings
+                warnings.warn(
+                    f"Failed to close renderer cleanly: {exc}. This is expected in CPU mode when OpenGL context is not fuully initialized",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def __enter__(self) -> "SimulationResources":
         return self
